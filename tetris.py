@@ -74,15 +74,13 @@ class TetrisGame:
         self.bag = list(range(0,7))
         self.currentPiece = None
         self.currentPiecePos = None    #NOTE: (y,x)
-        self.currentPieceRotation = 0
 
         self.gameSpeed = 60
 
         self.spawn_new_piece_from_bag()
         return
     
-    def spawn_new_piece_from_bag(self):
-        # idx = random.randint(0,len(self.bag)-1)
+    def spawn_new_piece_from_bag(self): #also checks for gameover
         idx = random.choice(self.bag)
         self.bag.remove(idx)
         if len(self.bag) <= 0:
@@ -90,7 +88,8 @@ class TetrisGame:
         self.currentPiece = shapes[idx]
         self.currentPiecePos = [0, GRID_X // 2]
         self.currentPieceRotation = 0
-        # TODO - check HERE for gameover!
+        if self.check_collision(0,0) != 0:
+            self.gameOver = True
         return
     
     def place_current_piece(self):
@@ -188,7 +187,10 @@ class TetrisGame:
         scoreLabel = font.render("Lines Cleared: " + str(self.clearedLines),1, (255,255,255))
         screen.blit(levelLabel, (20,620))
         screen.blit(scoreLabel, (20,650))
-        pygame.display.flip()
+
+        if tetris.gameOver:
+            gameOverLabel = font.render("GAME OVER", 1, (255,255,255))
+            screen.blit(gameOverLabel, (20, 670))
         return
 
 #TODO - move "code to new function PlayGame() or UpdateGame?"
@@ -226,4 +228,12 @@ if __name__ == "__main__":
         pygame.display.flip()
         clock.tick(tetris.gameSpeed)  # Speed of the game
     # OUT OF WHILE LOOP
+    # TODO - remove this! only for testing/standalone
+    while True:
+        screen.fill((0,0,0))
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+        tetris.draw(screen,font)
+        pygame.display.flip()
     pygame.quit()
