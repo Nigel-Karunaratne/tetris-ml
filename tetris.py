@@ -1,6 +1,7 @@
 import pygame
 import numpy as np
 import random
+from enum import IntEnum
 
 pygame.init()
 font = pygame.font.SysFont("monospace", 18)
@@ -63,14 +64,23 @@ SHAPE_I = [
 shapes = [SHAPE_S, SHAPE_Z, SHAPE_L, SHAPE_J, SHAPE_T, SHAPE_O, SHAPE_I]
 shapes_colors = [(255,0,0),(0,255,0),(0,0,255),(255,165,0),(255,0,255),(255,255,0),(0,255,255)]
 
+class TetrisAction(IntEnum):
+    MOVE_LEFT = 0
+    MOVE_RIGHT = 1
+    ROTATE = 2
+    MOVE_DOWN = 3
+
 class TetrisGame:
-    def __init__(self, gameSpeed = 60, humanGame=False):
+    def __init__(self, gameSpeed = 60, humanGame=False, visual=True):
         self.gameSpeed = gameSpeed
         self.humanGame=humanGame
+        self.visual=visual
 
-        self.py_screen = pygame.display.set_mode((SCREEN_W,SCREEN_H))
-        pygame.display.set_caption("simple paithon tetris")
-        self.py_clock = pygame.time.Clock()
+        if self.visual:
+            self.py_screen = pygame.display.set_mode((SCREEN_W,SCREEN_H))
+            pygame.display.set_caption("simple paithon tetris")
+            if self.humanGame:
+                self.py_clock = pygame.time.Clock()
         self.reset_game()
         return
     
@@ -149,6 +159,15 @@ class TetrisGame:
         self.level = (self.clearedLines // 5) + 1
         return
 
+    def get_max_height(self):
+        height = GRID_Y
+        for line in self.board:
+            height-=1
+            for cell in line:
+                if cell != ' ':
+                    return height
+        return 0
+
     # 0 for no collision, -1 for left, 1 for right, 2 for above/below
     def check_collision(self, dx, dy):
         for y,row in enumerate(self.currentPiece):
@@ -165,6 +184,8 @@ class TetrisGame:
         return 0
     
     def draw(self, font):
+        if not self.visual:
+            return
         self.py_screen.fill((0,0,0))
         for y in range(GRID_Y):
             for x in range(GRID_X):
@@ -182,7 +203,7 @@ class TetrisGame:
         self.py_screen.blit(levelLabel, (20,620))
         self.py_screen.blit(scoreLabel, (20,650))
 
-        if tetris.gameOver:
+        if self.gameOver:
             gameOverLabel = font.render("GAME OVER", 1, (255,255,255))
             self.py_screen.blit(gameOverLabel, (20, 670))
         return
@@ -201,20 +222,22 @@ class TetrisGame:
         self.currentPiecePos = None    #NOTE: (y,x)
         self.frame_iteration = 0
         self.spawn_new_piece_from_bag()
-        return
+        return self.get_state()
 
     # Returns reward, isGameOver, state
+    # action is only used if self.humanGame is false
     def play_step(self, action) -> tuple[int, bool, int]:
+        if self.gameOver:
+            print("Game Over!")
+            return 0, self.gameOver, self.get_state()
         self.frame_iteration += 1
         reward = 0
         moved_down = False
         oldClearedLines = self.clearedLines
+        oldMaxHeight = self.get_max_height()
+        oldCurrentPieceY = self.currentPiecePos[0]
 
-        # TODO - process action
-
-        if not self.humanGame:
-            pass
-        else:
+        if self.humanGame:
             pressed = pygame.key.get_pressed()
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -228,17 +251,55 @@ class TetrisGame:
                         self.rotate()
                 if pressed[pygame.K_DOWN]:
                         moved_down = True
+                        reward += 3
                         self.move_down()
+        else:
+            match action:
+                case TetrisAction.MOVE_LEFT:
+                    self.move_left()
+                case TetrisAction.MOVE_RIGHT:
+                    self.move_right()
+                case TetrisAction.ROTATE:
+                    self.rotate()
+                case TetrisAction.MOVE_DOWN:
+                    moved_down = True
+                    self.move_down()
+            for _ in pygame.event.get():
+                pass
 
-        self.natural_fall_increment() if not moved_down else self.natural_fall_reset()
-        
-        reward = (self.clearedLines - oldClearedLines) * 5
+        if not moved_down:
+            self.natural_fall_increment() 
+        else:
+            self.natural_fall_reset()
+
+        # REWARD CALCULATIONS
+        thisStepLinesCleared = self.clearedLines - oldClearedLines
+        reward += thisStepLinesCleared * 100 # every line cleared gives a nice bonus
+
         if self.gameOver:
-            reward = -10
-        
-        self.draw(font)
-        pygame.display.flip()
-        self.py_clock.tick(tetris.gameSpeed)  # Speed of the game
+            reward -= 1000 # should encourage agent to not auto-lose
+
+        if moved_down:
+            reward += 5 # small encouragement to move the piece down by force instead of waiting / continually "shifting" LR
+
+        newMaxHeight = self.get_max_height()  # Get the highest point on the board
+        heightPenalty = newMaxHeight - oldMaxHeight
+        if heightPenalty > 0:
+            reward -= heightPenalty * 25  # Penalty for placing the piece higher
+        else:
+            reward += 1  # Very small reward for not increasing the tetromino stack's height
+
+        newCurrentPieceY = self.currentPiecePos[0]
+        moveDownPenalty = newCurrentPieceY - oldCurrentPieceY
+        if moveDownPenalty <= 0:
+            reward -= 10 # Move the damn piece down
+
+        # FINISH UP STEP (draw, tick)
+        if self.visual:
+            self.draw(font)
+            pygame.display.flip()
+            if self.humanGame:
+                self.py_clock.tick(self.gameSpeed)  # Speed of the game
         
         return reward, self.gameOver, self.get_state()
     
@@ -255,22 +316,21 @@ class TetrisGame:
     
     def get_state_size(self):
         return 218 #grid size + current piece shape + lines cleared
-    def get_action_size(self):
-        return 4 #left, right, rotate, down
 
 if __name__ == "__main__":
-    tetris = TetrisGame()
+    tetris = TetrisGame(gameSpeed=60, humanGame=True)
 
     while not tetris.gameOver:
         tetris.play_step('none')
-    # OUT OF WHILE LOOP
 
-    # TODO - remove this! only for testing/standalone
-    while True:
+    # ONLY FOR STANDALONE GAME
+    shouldExit = False
+    while not shouldExit:
         tetris.py_screen.fill((0,0,0))
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
+                shouldExit = True
         tetris.draw(font)
         pygame.display.flip()
     pygame.quit()
